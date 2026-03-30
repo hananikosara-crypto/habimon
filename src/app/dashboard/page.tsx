@@ -1,9 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { createBrowserClient } from '@/lib/supabase'
+import { checkHabitAndUpdateMonster } from '@/lib/points'
+import { calcStreak } from '@/lib/streak'
 import MonsterDisplay from '@/components/MonsterDisplay'
 import HabitList, { type HabitItem } from '@/components/HabitList'
 import StatusCards from '@/components/StatusCards'
@@ -11,7 +13,7 @@ import BottomNav from '@/components/BottomNav'
 import { Button } from '@/components/ui/button'
 import type { GoalCategory, CourseType, HabitFrequency, MonsterStage } from '@/types'
 
-// DB から返る行の型（スキーマに合わせた定義）
+// DB から返る行の型
 type GoalRow = {
   id: string
   title: string
@@ -43,43 +45,13 @@ type HabitLogRow = {
   points_earned: number
 }
 
-// ========== ストリーク計算 ==========
-function calcStreak(logs: HabitLogRow[]): number {
-  if (logs.length === 0) return 0
-
-  // 完了した日付（JST 的に YYYY-MM-DD）の Set を作成
-  const dates = new Set(
-    logs.map((log) => log.completed_at.slice(0, 10))
-  )
-
-  const today = new Date()
-  let streak = 0
-  let checking = new Date(today)
-
-  // 今日完了がなければ昨日から数える
-  const todayStr = today.toISOString().slice(0, 10)
-  if (!dates.has(todayStr)) {
-    checking.setDate(checking.getDate() - 1)
-  }
-
-  while (true) {
-    const dateStr = checking.toISOString().slice(0, 10)
-    if (dates.has(dateStr)) {
-      streak++
-      checking.setDate(checking.getDate() - 1)
-    } else {
-      break
-    }
-  }
-
-  return streak
-}
-
 // ========== メインページ ==========
 export default function DashboardPage() {
   const { user, loading: authLoading, signOut } = useAuth()
   const router = useRouter()
   const supabase = createBrowserClient()
+  // supabase インスタンスを ref で保持（useCallback の依存から外す）
+  const supabaseRef = useRef(supabase)
 
   // データ状態
   const [goals, setGoals] = useState<GoalRow[]>([])
@@ -99,11 +71,12 @@ export default function DashboardPage() {
   // データ取得
   const fetchData = useCallback(async () => {
     if (!user) return
+    const sb = supabaseRef.current
     setDataLoading(true)
 
     try {
       // 1. アクティブな目標を取得
-      const { data: goalsData } = await supabase
+      const { data: goalsData } = await sb
         .from('goals')
         .select('id, title, category, course_type, status')
         .eq('user_id', user.id)
@@ -113,7 +86,6 @@ export default function DashboardPage() {
       const activeGoals: GoalRow[] = goalsData ?? []
       setGoals(activeGoals)
 
-      // 目標がなければオンボーディングへ
       if (activeGoals.length === 0) {
         router.replace('/onboarding')
         return
@@ -122,7 +94,7 @@ export default function DashboardPage() {
       const goalIds = activeGoals.map((g) => g.id)
 
       // 2. 最初の目標に紐づくモンスターを取得
-      const { data: monsterData } = await supabase
+      const { data: monsterData } = await sb
         .from('monsters')
         .select('id, goal_id, name, stage, total_points, level')
         .eq('goal_id', activeGoals[0].id)
@@ -131,7 +103,7 @@ export default function DashboardPage() {
       setMonster(monsterData ?? null)
 
       // 3. 習慣を取得
-      const { data: habitsData } = await supabase
+      const { data: habitsData } = await sb
         .from('habits')
         .select('id, goal_id, title, frequency')
         .in('goal_id', goalIds)
@@ -141,19 +113,19 @@ export default function DashboardPage() {
 
       // 4. 今日の habit_logs を取得
       const todayStr = new Date().toISOString().slice(0, 10)
-      const { data: todayLogsData } = await supabase
+      const { data: todayLogsData } = await sb
         .from('habit_logs')
         .select('id, habit_id, completed_at, points_earned')
         .eq('user_id', user.id)
         .gte('completed_at', `${todayStr}T00:00:00`)
-        .lt('completed_at', `${todayStr}T23:59:59.999`)
+        .lte('completed_at', `${todayStr}T23:59:59.999`)
 
       setTodayLogs(todayLogsData ?? [])
 
       // 5. 過去 60 日分のログ（ストリーク計算用）
       const sixtyDaysAgo = new Date()
       sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60)
-      const { data: allLogsData } = await supabase
+      const { data: allLogsData } = await sb
         .from('habit_logs')
         .select('id, habit_id, completed_at, points_earned')
         .eq('user_id', user.id)
@@ -163,13 +135,72 @@ export default function DashboardPage() {
     } finally {
       setDataLoading(false)
     }
-  }, [user, supabase, router])
+  }, [user, router])
 
   useEffect(() => {
     if (!authLoading && user) {
       fetchData()
     }
   }, [user, authLoading, fetchData])
+
+  // ========== 習慣チェック処理 ==========
+  const handleCheck = useCallback(async (habitId: string): Promise<number | null> => {
+    if (!user || !monster) return null
+
+    const primaryGoal = goals[0]
+    if (!primaryGoal) return null
+
+    const habit = habits.find((h) => h.id === habitId)
+    if (!habit) return null
+
+    // 完了済みチェック（二重防止）
+    if (todayLogs.some((log) => log.habit_id === habitId)) return null
+
+    const allHabitIds = habits.map((h) => h.id)
+    const completedHabitIds = todayLogs.map((log) => log.habit_id)
+    const currentStreak = calcStreak(allLogs)
+
+    try {
+      const result = await checkHabitAndUpdateMonster({
+        supabase: supabaseRef.current,
+        habitId,
+        userId: user.id,
+        monsterId: monster.id,
+        category: primaryGoal.category,
+        courseType: primaryGoal.course_type,
+        currentTotalPoints: monster.total_points,
+        currentStage: monster.stage,
+        currentStreak,
+        allHabitIds,
+        completedHabitIds,
+      })
+
+      // ローカル状態を楽観的に更新
+      const newLog: HabitLogRow = {
+        id: `temp-${Date.now()}`,
+        habit_id: habitId,
+        completed_at: new Date().toISOString(),
+        points_earned: result.pointsEarned,
+      }
+      setTodayLogs((prev) => [...prev, newLog])
+      setAllLogs((prev) => [...prev, newLog])
+      setMonster((prev) =>
+        prev
+          ? { ...prev, total_points: result.newTotalPoints, level: result.newLevel, stage: result.newStage }
+          : prev
+      )
+
+      // 進化した場合はデータを再取得して最新状態を反映
+      if (result.evolved) {
+        setTimeout(() => fetchData(), 800)
+      }
+
+      return result.pointsEarned
+    } catch (err) {
+      console.error('習慣チェックエラー:', err)
+      return null
+    }
+  }, [user, monster, goals, habits, todayLogs, allLogs, fetchData])
 
   // サインアウト
   const handleSignOut = async () => {
@@ -190,10 +221,8 @@ export default function DashboardPage() {
   }
 
   // ========== 派生データ計算 ==========
-  // 完了済み習慣の habit_id Set
   const completedHabitIds = new Set(todayLogs.map((log) => log.habit_id))
 
-  // 今日の毎日習慣のみを表示（週次/カスタムは簡易的に全表示）
   const todayHabits: HabitItem[] = habits.map((habit) => {
     const goal = goals.find((g) => g.id === habit.goal_id)
     return {
@@ -272,14 +301,10 @@ export default function DashboardPage() {
         <div className="bg-white rounded-2xl border border-border p-4 shadow-sm">
           <HabitList
             habits={todayHabits}
-            onToggle={(habitId) => {
-              // チェック機能は Task5 で実装予定
-              console.log('toggle habit:', habitId)
-            }}
+            onCheck={handleCheck}
           />
         </div>
 
-        {/* 全目標数が2件以上の場合のヒント */}
         {goals.length > 1 && (
           <p className="text-xs text-center text-muted-foreground">
             他に {goals.length - 1} 件の目標があります
@@ -287,7 +312,6 @@ export default function DashboardPage() {
         )}
       </main>
 
-      {/* ========== ボトムナビ ========== */}
       <BottomNav />
     </div>
   )
