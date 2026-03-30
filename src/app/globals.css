@@ -140,3 +140,83 @@
   animation: float-up-fade 1.3s ease-out forwards;
   pointer-events: none;
 }
+
+/* ========== 進化演出アニメーション ========== */
+
+/* オーバーレイのフェードイン */
+@keyframes evo-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.evo-overlay {
+  animation: evo-overlay-in 0.4s ease-out forwards;
+}
+
+/* 旧絵文字の退場（スケールアップ→フェードアウト） */
+@keyframes evo-old-exit {
+  0%   { opacity: 1; transform: scale(1);   filter: brightness(1); }
+  40%  { opacity: 1; transform: scale(1.35); filter: brightness(2); }
+  100% { opacity: 0; transform: scale(0.4);  filter: brightness(3); }
+}
+.evo-old-exit {
+  animation: evo-old-exit 0.7s ease-in forwards;
+}
+
+/* フラッシュエフェクト */
+@keyframes evo-flash {
+  0%   { opacity: 0; }
+  30%  { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.evo-flash {
+  animation: evo-flash 0.6s ease-out forwards;
+}
+
+/* 新絵文字の登場（スケールイン） */
+@keyframes evo-new-enter {
+  0%   { opacity: 0; transform: scale(0) rotate(-20deg); }
+  50%  { opacity: 1; transform: scale(1.5) rotate(8deg);  }
+  75%  { transform: scale(0.85) rotate(-3deg); }
+  100% { opacity: 1; transform: scale(1)   rotate(0deg);  }
+}
+.evo-new-enter {
+  animation: evo-new-enter 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* キラキラ回転 */
+@keyframes evo-sparkle {
+  0%   { opacity: 0; transform: scale(0) rotate(0deg);   }
+  40%  { opacity: 1; transform: scale(1.1) rotate(120deg); }
+  100% { opacity: 0; transform: scale(0) rotate(360deg);  }
+}
+.evo-sparkle-1 { animation: evo-sparkle 1.2s 0.1s ease-in-out forwards; }
+.evo-sparkle-2 { animation: evo-sparkle 1.2s 0.25s ease-in-out forwards; }
+.evo-sparkle-3 { animation: evo-sparkle 1.2s 0.05s ease-in-out forwards; }
+.evo-sparkle-4 { animation: evo-sparkle 1.2s 0.35s ease-in-out forwards; }
+
+/* メッセージのスライドイン */
+@keyframes evo-message-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.evo-message-in {
+  animation: evo-message-in 0.5s ease-out forwards;
+}
+
+/* ボタンのフェードイン */
+@keyframes evo-button-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.evo-button-in {
+  animation: evo-button-in 0.4s ease-out forwards;
+}
+
+/* 背景のオーラ（ループ） */
+@keyframes evo-aura {
+  0%, 100% { box-shadow: 0 0 40px 10px rgba(16,185,129,0.3); }
+  50%       { box-shadow: 0 0 80px 30px rgba(16,185,129,0.6); }
+}
+.evo-aura {
+  animation: evo-aura 1.5s ease-in-out infinite;
+}

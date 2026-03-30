@@ -6,10 +6,12 @@ import { useAuth } from '@/hooks/useAuth'
 import { createBrowserClient } from '@/lib/supabase'
 import { checkHabitAndUpdateMonster } from '@/lib/points'
 import { calcStreak } from '@/lib/streak'
+import { getEvolutionTable } from '@/constants/evolution'
 import MonsterDisplay from '@/components/MonsterDisplay'
 import HabitList, { type HabitItem } from '@/components/HabitList'
 import StatusCards from '@/components/StatusCards'
 import BottomNav from '@/components/BottomNav'
+import EvolutionAnimation from '@/components/EvolutionAnimation'
 import { Button } from '@/components/ui/button'
 import type { GoalCategory, CourseType, HabitFrequency, MonsterStage } from '@/types'
 
@@ -60,6 +62,16 @@ export default function DashboardPage() {
   const [todayLogs, setTodayLogs] = useState<HabitLogRow[]>([])
   const [allLogs, setAllLogs] = useState<HabitLogRow[]>([])
   const [dataLoading, setDataLoading] = useState(true)
+
+  // 進化演出
+  type EvolutionInfo = {
+    monsterName: string
+    oldStage: MonsterStage
+    newStage: MonsterStage
+    oldStageName: string
+    newStageName: string
+  }
+  const [evolutionInfo, setEvolutionInfo] = useState<EvolutionInfo | null>(null)
 
   // 未ログインリダイレクト
   useEffect(() => {
@@ -159,6 +171,7 @@ export default function DashboardPage() {
     const allHabitIds = habits.map((h) => h.id)
     const completedHabitIds = todayLogs.map((log) => log.habit_id)
     const currentStreak = calcStreak(allLogs)
+    const currentStage = monster.stage  // 進化前ステージ（演出用に保存）
 
     try {
       const result = await checkHabitAndUpdateMonster({
@@ -169,7 +182,7 @@ export default function DashboardPage() {
         category: primaryGoal.category,
         courseType: primaryGoal.course_type,
         currentTotalPoints: monster.total_points,
-        currentStage: monster.stage,
+        currentStage,
         currentStreak,
         allHabitIds,
         completedHabitIds,
@@ -190,9 +203,18 @@ export default function DashboardPage() {
           : prev
       )
 
-      // 進化した場合はデータを再取得して最新状態を反映
+      // 進化した場合：演出を表示してから再フェッチ
       if (result.evolved) {
-        setTimeout(() => fetchData(), 800)
+        const table = getEvolutionTable(primaryGoal.course_type)
+        const oldEntry = table.find((e) => e.stage === currentStage)
+        const newEntry = table.find((e) => e.stage === result.newStage)
+        setEvolutionInfo({
+          monsterName: monster.name,
+          oldStage: currentStage,
+          newStage: result.newStage,
+          oldStageName: oldEntry?.name ?? 'たまご',
+          newStageName: newEntry?.name ?? 'ベビー',
+        })
       }
 
       return result.pointsEarned
@@ -244,6 +266,21 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      {/* ========== 進化演出モーダル ========== */}
+      {evolutionInfo && (
+        <EvolutionAnimation
+          monsterName={evolutionInfo.monsterName}
+          oldStage={evolutionInfo.oldStage}
+          newStage={evolutionInfo.newStage}
+          oldStageName={evolutionInfo.oldStageName}
+          newStageName={evolutionInfo.newStageName}
+          onClose={() => {
+            setEvolutionInfo(null)
+            fetchData()  // 演出後にデータ再取得
+          }}
+        />
+      )}
+
       {/* ========== ヘッダー ========== */}
       <header className="bg-white border-b border-border sticky top-0 z-40 shadow-sm">
         <div className="max-w-lg mx-auto flex items-center justify-between px-4 h-14">
