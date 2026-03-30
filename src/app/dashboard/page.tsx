@@ -39,6 +39,7 @@ type HabitRow = {
   goal_id: string
   title: string
   frequency: HabitFrequency
+  category: GoalCategory | null  // 習慣ごとのカテゴリ
 }
 
 type HabitLogRow = {
@@ -115,10 +116,10 @@ export default function DashboardPage() {
 
       setMonster(monsterData ?? null)
 
-      // 3. 習慣を取得
+      // 3. 習慣を取得（category を含む）
       const { data: habitsData } = await sb
         .from('habits')
-        .select('id, goal_id, title, frequency')
+        .select('id, goal_id, title, frequency, category')
         .in('goal_id', goalIds)
         .eq('user_id', user.id)
 
@@ -180,7 +181,7 @@ export default function DashboardPage() {
         habitId,
         userId: user.id,
         monsterId: monster.id,
-        category: primaryGoal.category,
+        category: habit.category ?? 'その他',  // 習慣ごとのカテゴリを使用
         courseType: primaryGoal.course_type,
         currentTotalPoints: monster.total_points,
         currentStage,
@@ -263,16 +264,13 @@ export default function DashboardPage() {
   // ========== 派生データ計算 ==========
   const completedHabitIds = new Set(todayLogs.map((log) => log.habit_id))
 
-  const todayHabits: HabitItem[] = habits.map((habit) => {
-    const goal = goals.find((g) => g.id === habit.goal_id)
-    return {
-      id: habit.id,
-      title: habit.title,
-      frequency: habit.frequency,
-      goalCategory: goal?.category ?? 'その他',
-      completed: completedHabitIds.has(habit.id),
-    }
-  })
+  const todayHabits: HabitItem[] = habits.map((habit) => ({
+    id: habit.id,
+    title: habit.title,
+    frequency: habit.frequency,
+    category: habit.category ?? 'その他',  // 習慣ごとのカテゴリ
+    completed: completedHabitIds.has(habit.id),
+  }))
 
   const totalToday = todayHabits.length
   const completedToday = todayHabits.filter((h) => h.completed).length

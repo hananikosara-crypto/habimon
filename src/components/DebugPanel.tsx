@@ -25,12 +25,10 @@ type DebugPanelProps = {
   onTriggerEvolution: (oldStage: MonsterStage, newStage: MonsterStage) => void
 }
 
-// 本番では絶対に表示しない
-const IS_DEV = process.env.NODE_ENV === 'development'
-
 export default function DebugPanel(props: DebugPanelProps) {
-  // 本番ビルドでは即 null（webpack が dead-code として除去）
-  if (!IS_DEV) return null
+  // 本番ビルドでは絶対に表示しない
+  // process.env.NODE_ENV をインラインで評価（モジュールレベルの定数に依存しない）
+  if (process.env.NODE_ENV !== 'development') return null
 
   return <DebugPanelInner {...props} />
 }
@@ -169,7 +167,10 @@ function DebugPanelInner({
 
   // ---- UI ----
   return (
-    <div className="fixed bottom-20 right-3 z-[60] flex flex-col items-end gap-2">
+    <div
+      className="flex flex-col items-end gap-2"
+      style={{ position: 'fixed', bottom: '80px', right: '16px', zIndex: 9999 }}
+    >
       {/* メッセージトースト */}
       {message && (
         <div className="text-xs bg-gray-800 text-white px-3 py-1.5 rounded-lg max-w-[220px] text-right shadow-lg">

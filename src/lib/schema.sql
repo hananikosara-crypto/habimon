@@ -189,3 +189,15 @@ CREATE POLICY "monster_stats: 自分のモンスターのみ操作"
         AND m.user_id = auth.uid()
     )
   );
+
+-- ============================================================
+-- 追加マイグレーション: habits テーブルに category カラムを追加
+-- Supabase SQL Editor で実行してください
+-- ============================================================
+
+ALTER TABLE public.habits
+  ADD COLUMN IF NOT EXISTS category text
+  CHECK (category IN ('学習', '健康', '仕事', '生活', '趣味', 'その他'));
+
+-- 既存レコードのデフォルト値を設定（NULLのままでも可）
+-- UPDATE public.habits SET category = 'その他' WHERE category IS NULL;

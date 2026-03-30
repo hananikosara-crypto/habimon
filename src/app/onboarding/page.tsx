@@ -19,13 +19,17 @@ import {
 } from '@/components/ui/select'
 import type { GoalCategory, CourseType, HabitFrequency } from '@/types'
 
-// ステップ番号
 const TOTAL_STEPS = 3
 
 type HabitInput = {
   title: string
   frequency: HabitFrequency
+  category: GoalCategory
 }
+
+const CATEGORIES: GoalCategory[] = ['学習', '健康', '仕事', '生活', '趣味', 'その他']
+const FREQUENCIES: HabitFrequency[] = ['毎日', '週次', 'カスタム']
+const MAX_HABITS = 5
 
 export default function OnboardingPage() {
   const { user } = useAuth()
@@ -36,28 +40,27 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Step1: 目標
+  // Step1: 目標（タイトル + コース期間のみ）
   const [goalTitle, setGoalTitle] = useState('')
-  const [goalCategory, setGoalCategory] = useState<GoalCategory | ''>('')
   const [courseType, setCourseType] = useState<CourseType | ''>('')
 
-  // Step2: 習慣（最大3個）
-  const [habits, setHabits] = useState<HabitInput[]>([{ title: '', frequency: '毎日' }])
+  // Step2: 習慣（カテゴリ付き、最大5個）
+  const [habits, setHabits] = useState<HabitInput[]>([
+    { title: '', frequency: '毎日', category: '学習' },
+  ])
 
   // Step3: モンスター命名
   const [monsterName, setMonsterName] = useState('')
 
   const progress = ((step - 1) / TOTAL_STEPS) * 100
 
-  // --- Step1バリデーション ---
-  const step1Valid = goalTitle.trim() !== '' && goalCategory !== '' && courseType !== ''
-
-  // --- Step2バリデーション ---
-  const step2Valid = habits.every(h => h.title.trim() !== '')
+  // バリデーション
+  const step1Valid = goalTitle.trim() !== '' && courseType !== ''
+  const step2Valid = habits.length >= 1 && habits.every(h => h.title.trim() !== '')
 
   const addHabit = () => {
-    if (habits.length < 3) {
-      setHabits([...habits, { title: '', frequency: '毎日' }])
+    if (habits.length < MAX_HABITS) {
+      setHabits([...habits, { title: '', frequency: '毎日', category: '学習' }])
     }
   }
 
@@ -67,26 +70,30 @@ export default function OnboardingPage() {
     }
   }
 
-  const updateHabit = (index: number, field: keyof HabitInput, value: string) => {
+  const updateHabit = <K extends keyof HabitInput>(index: number, field: K, value: HabitInput[K]) => {
     setHabits(habits.map((h, i) => i === index ? { ...h, [field]: value } : h))
   }
 
-  // --- データ保存 ---
+  // データ保存
   const handleFinish = async () => {
     if (!user) return
-    if (!goalTitle || !goalCategory || !courseType) return
+    if (!goalTitle || !courseType) return
 
     setSaving(true)
     setError('')
 
     try {
+      const validHabits = habits.filter(h => h.title.trim() !== '')
+      // 目標のカテゴリは最初の習慣のカテゴリをデフォルトとして使用
+      const defaultCategory: GoalCategory = validHabits[0]?.category ?? 'その他'
+
       // 1. 目標を作成
       const { data: goal, error: goalError } = await supabase
         .from('goals')
         .insert({
           user_id: user.id,
           title: goalTitle,
-          category: goalCategory,
+          category: defaultCategory,  // goals.category は NOT NULL のため
           course_type: courseType,
         })
         .select()
@@ -94,8 +101,7 @@ export default function OnboardingPage() {
 
       if (goalError) throw goalError
 
-      // 2. 習慣を作成
-      const validHabits = habits.filter(h => h.title.trim() !== '')
+      // 2. 習慣を作成（各習慣にカテゴリ付き）
       if (validHabits.length > 0) {
         const { error: habitsError } = await supabase
           .from('habits')
@@ -105,12 +111,13 @@ export default function OnboardingPage() {
               user_id: user.id,
               title: h.title,
               frequency: h.frequency,
+              category: h.category,
             }))
           )
         if (habitsError) throw habitsError
       }
 
-      // 3. モンスターを作成（stage=1: たまご）
+      // 3. モンスターを作成
       const { data: monster, error: monsterError } = await supabase
         .from('monsters')
         .insert({
@@ -140,7 +147,6 @@ export default function OnboardingPage() {
 
       if (statsError) throw statsError
 
-      // ダッシュボードへ
       router.replace('/dashboard')
     } catch (err) {
       console.error(err)
@@ -148,9 +154,6 @@ export default function OnboardingPage() {
       setSaving(false)
     }
   }
-
-  const CATEGORIES: GoalCategory[] = ['学習', '健康', '仕事', '生活', '趣味', 'その他']
-  const FREQUENCIES: HabitFrequency[] = ['毎日', '週次', 'カスタム']
 
   return (
     <div className="flex flex-1 items-start justify-center p-4 bg-gradient-to-b from-emerald-50 to-white min-h-screen pt-12">
@@ -182,7 +185,7 @@ export default function OnboardingPage() {
           </div>
         </div>
 
-        {/* ======== Step 1: 目標設定 ======== */}
+        {/* ======== Step 1: 目標設定（タイトル + コース期間のみ） ======== */}
         {step === 1 && (
           <Card>
             <CardHeader>
@@ -201,22 +204,6 @@ export default function OnboardingPage() {
                   onChange={(e) => setGoalTitle(e.target.value)}
                   maxLength={50}
                 />
-              </div>
-
-              <div className="space-y-2">
-                <Label>カテゴリ</Label>
-                <div className="flex flex-wrap gap-2">
-                  {CATEGORIES.map((cat) => (
-                    <Badge
-                      key={cat}
-                      variant={goalCategory === cat ? 'default' : 'outline'}
-                      className={`cursor-pointer transition-colors ${goalCategory === cat ? 'bg-emerald-600 hover:bg-emerald-700' : 'hover:bg-emerald-50'}`}
-                      onClick={() => setGoalCategory(cat)}
-                    >
-                      {cat}
-                    </Badge>
-                  ))}
-                </div>
               </div>
 
               <div className="space-y-2">
@@ -254,14 +241,14 @@ export default function OnboardingPage() {
           </Card>
         )}
 
-        {/* ======== Step 2: 習慣登録 ======== */}
+        {/* ======== Step 2: 習慣登録（カテゴリ付き、最大5個） ======== */}
         {step === 2 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <span>📝</span> 習慣を登録しよう
               </CardTitle>
-              <CardDescription>目標に向けた習慣を1〜3個登録してください</CardDescription>
+              <CardDescription>各習慣にカテゴリと頻度を設定してください（1〜{MAX_HABITS}個）</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {habits.map((habit, index) => (
@@ -278,7 +265,9 @@ export default function OnboardingPage() {
                       </button>
                     )}
                   </div>
-                  <div className="space-y-2">
+
+                  {/* タイトル */}
+                  <div className="space-y-1.5">
                     <Label htmlFor={`habit-title-${index}`}>習慣のタイトル</Label>
                     <Input
                       id={`habit-title-${index}`}
@@ -288,11 +277,31 @@ export default function OnboardingPage() {
                       maxLength={50}
                     />
                   </div>
-                  <div className="space-y-2">
+
+                  {/* カテゴリ */}
+                  <div className="space-y-1.5">
+                    <Label>カテゴリ</Label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CATEGORIES.map((cat) => (
+                        <Badge
+                          key={cat}
+                          variant={habit.category === cat ? 'default' : 'outline'}
+                          className={`cursor-pointer transition-colors text-xs
+                            ${habit.category === cat ? 'bg-emerald-600 hover:bg-emerald-700' : 'hover:bg-emerald-50'}`}
+                          onClick={() => updateHabit(index, 'category', cat)}
+                        >
+                          {cat}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 頻度 */}
+                  <div className="space-y-1.5">
                     <Label htmlFor={`habit-freq-${index}`}>頻度</Label>
                     <Select
                       value={habit.frequency}
-                      onValueChange={(val) => updateHabit(index, 'frequency', val)}
+                      onValueChange={(val) => updateHabit(index, 'frequency', val as HabitFrequency)}
                     >
                       <SelectTrigger id={`habit-freq-${index}`}>
                         <SelectValue />
@@ -307,13 +316,13 @@ export default function OnboardingPage() {
                 </div>
               ))}
 
-              {habits.length < 3 && (
+              {habits.length < MAX_HABITS && (
                 <button
                   type="button"
                   onClick={addHabit}
                   className="w-full py-3 border-2 border-dashed border-muted-foreground/30 rounded-lg text-sm text-muted-foreground hover:border-emerald-400 hover:text-emerald-600 transition-colors"
                 >
-                  + 習慣を追加
+                  + 習慣を追加（{habits.length}/{MAX_HABITS}）
                 </button>
               )}
 
@@ -343,7 +352,6 @@ export default function OnboardingPage() {
               <CardDescription>あなたと一緒に成長するモンスターです</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* たまごのプレースホルダー */}
               <div className="flex flex-col items-center py-6 bg-gradient-to-b from-emerald-50 to-white rounded-xl border">
                 <div className="text-8xl mb-3 animate-bounce">🥚</div>
                 <Badge variant="secondary" className="text-xs">ステージ 1 / たまご</Badge>
@@ -367,16 +375,12 @@ export default function OnboardingPage() {
                 </p>
               </div>
 
-              {/* 入力内容の確認サマリー */}
+              {/* 確認サマリー */}
               <div className="bg-muted/50 rounded-lg p-4 space-y-2 text-sm">
                 <p className="font-medium text-muted-foreground">確認</p>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">目標</span>
                   <span className="font-medium truncate max-w-[200px]">{goalTitle}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">カテゴリ</span>
-                  <span>{goalCategory}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">コース</span>
@@ -385,6 +389,14 @@ export default function OnboardingPage() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">習慣数</span>
                   <span>{habits.filter(h => h.title.trim()).length}個</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">カテゴリ</span>
+                  <span className="flex gap-1 flex-wrap justify-end">
+                    {[...new Set(habits.filter(h => h.title.trim()).map(h => h.category))].map(cat => (
+                      <Badge key={cat} variant="secondary" className="text-xs">{cat}</Badge>
+                    ))}
+                  </span>
                 </div>
               </div>
 

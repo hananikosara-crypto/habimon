@@ -23,7 +23,7 @@ export type HabitItem = {
   id: string
   title: string
   frequency: HabitFrequency
-  goalCategory: GoalCategory
+  category: GoalCategory  // 習慣ごとのカテゴリ
   completed: boolean
 }
 
@@ -169,9 +169,9 @@ export default function HabitList({ habits, onCheck }: HabitListProps) {
                 {/* カテゴリバッジ */}
                 <span
                   className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full font-medium
-                    ${CATEGORY_COLOR[habit.goalCategory]}`}
+                    ${CATEGORY_COLOR[habit.category]}`}
                 >
-                  {habit.goalCategory}
+                  {habit.category}
                 </span>
               </button>
             </li>

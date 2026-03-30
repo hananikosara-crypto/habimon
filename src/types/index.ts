@@ -42,6 +42,7 @@ export type Habit = {
   title: string
   description: string | null
   frequency: HabitFrequency
+  category: GoalCategory | null  // 習慣ごとのカテゴリ（能力値更新に使用）
   // カスタム頻度の場合: 0=日, 1=月, ..., 6=土
   frequency_days: number[] | null
   is_active: boolean
