@@ -12,6 +12,7 @@ import HabitList, { type HabitItem } from '@/components/HabitList'
 import StatusCards from '@/components/StatusCards'
 import BottomNav from '@/components/BottomNav'
 import EvolutionAnimation from '@/components/EvolutionAnimation'
+import DebugPanel from '@/components/DebugPanel'
 import { Button } from '@/components/ui/button'
 import type { GoalCategory, CourseType, HabitFrequency, MonsterStage } from '@/types'
 
@@ -224,6 +225,23 @@ export default function DashboardPage() {
     }
   }, [user, monster, goals, habits, todayLogs, allLogs, fetchData])
 
+  // デバッグ用：進化演出を強制発動
+  const handleTriggerEvolution = useCallback((oldStage: MonsterStage, newStage: MonsterStage) => {
+    if (!monster) return
+    const primaryGoal = goals[0]
+    if (!primaryGoal) return
+    const table = getEvolutionTable(primaryGoal.course_type)
+    const oldEntry = table.find((e) => e.stage === oldStage)
+    const newEntry = table.find((e) => e.stage === newStage)
+    setEvolutionInfo({
+      monsterName: monster.name,
+      oldStage,
+      newStage,
+      oldStageName: oldEntry?.name ?? 'たまご',
+      newStageName: newEntry?.name ?? 'ベビー',
+    })
+  }, [monster, goals])
+
   // サインアウト
   const handleSignOut = async () => {
     await signOut()
@@ -350,6 +368,21 @@ export default function DashboardPage() {
       </main>
 
       <BottomNav />
+
+      {/* ========== デバッグパネル（開発環境のみ） ========== */}
+      {monster && (
+        <DebugPanel
+          monsterId={monster.id}
+          monsterName={monster.name}
+          userId={user!.id}
+          habitIds={habits.map((h) => h.id)}
+          currentStage={monster.stage}
+          currentPoints={monster.total_points}
+          courseType={primaryGoal?.course_type ?? '1年'}
+          onRefresh={fetchData}
+          onTriggerEvolution={handleTriggerEvolution}
+        />
+      )}
     </div>
   )
 }
