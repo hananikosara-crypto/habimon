@@ -274,3 +274,25 @@ DO $$ BEGIN
       FOR DELETE USING (auth.uid() = user_id);
   END IF;
 END $$;
+
+-- ============================================================
+-- ⚠️  完全リセット用 SQL（開発時のみ使用）
+-- 本番環境では絶対に実行しないこと！
+-- 全ユーザーデータが消去されます。
+--
+-- 使い方: コメントを外してから SQL Editor で実行
+-- ============================================================
+
+/*
+-- 既存テーブルを全て削除（依存関係順）
+DROP TABLE IF EXISTS monster_stats CASCADE;
+DROP TABLE IF EXISTS habit_logs CASCADE;
+DROP TABLE IF EXISTS monsters CASCADE;
+DROP TABLE IF EXISTS habits CASCADE;
+DROP TABLE IF EXISTS goals CASCADE;
+DROP TABLE IF EXISTS profiles CASCADE;
+
+-- トリガーと関数も削除
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user();
+*/
