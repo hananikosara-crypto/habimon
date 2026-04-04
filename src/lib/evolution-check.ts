@@ -13,7 +13,6 @@ export type EvolutionCheckResult = {
 
 /**
  * 新しい合計ポイントと現在のステージから進化するかを判定する
- * DB の更新は points.ts の checkHabitAndUpdateMonster で行う
  */
 export function checkEvolution(
   newTotalPoints: number,

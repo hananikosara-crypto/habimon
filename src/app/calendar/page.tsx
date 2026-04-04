@@ -85,21 +85,22 @@ export default function CalendarPage() {
           .select('id, title, category, frequency')
           .in('goal_id', goalIds)
           .eq('user_id', user.id)
+          .eq('is_active', true)
         setHabits(habitsData ?? [])
       } else {
         setHabits([])
       }
 
-      // 対象月全体のログを取得
-      const firstDay = `${year}-${String(month + 1).padStart(2, '0')}-01T00:00:00`
-      const lastDay = new Date(year, month + 1, 0)
-      const lastDayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}T23:59:59`
+      // 対象月全体のログを取得（completed_at は date 型 = YYYY-MM-DD）
+      const firstDayStr = `${year}-${String(month + 1).padStart(2, '0')}-01`
+      const lastDayNum = new Date(year, month + 1, 0).getDate()
+      const lastDayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDayNum).padStart(2, '0')}`
 
       const { data: logsData } = await supabase
         .from('habit_logs')
         .select('habit_id, completed_at, status')
         .eq('user_id', user.id)
-        .gte('completed_at', firstDay)
+        .gte('completed_at', firstDayStr)
         .lte('completed_at', lastDayStr)
 
       setLogs(

@@ -11,7 +11,7 @@ import MonsterStats from '@/components/MonsterStats'
 import BottomNav from '@/components/BottomNav'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
-import type { GoalCategory, CourseType, MonsterStage } from '@/types'
+import type { CourseType, MonsterStage } from '@/types'
 
 type MonsterData = {
   id: string
@@ -32,7 +32,6 @@ type StatsData = {
 type GoalData = {
   id: string
   title: string
-  category: GoalCategory
   course_type: CourseType
 }
 
@@ -59,7 +58,7 @@ export default function MonsterPage() {
       // アクティブな目標を取得
       const { data: goalsData } = await supabase
         .from('goals')
-        .select('id, title, category, course_type')
+        .select('id, title, course_type')
         .eq('user_id', user.id)
         .eq('status', 'active')
         .order('created_at', { ascending: false })

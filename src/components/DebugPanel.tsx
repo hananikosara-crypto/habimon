@@ -114,14 +114,16 @@ function DebugPanelInner({
   const completeAllToday = () =>
     run('全習慣を今日完了', async () => {
       if (habitIds.length === 0) return
-      const now = new Date().toISOString()
+      const todayStr = new Date().toISOString().slice(0, 10)  // YYYY-MM-DD (date型)
       const rows = habitIds.map((habitId) => ({
         habit_id: habitId,
         user_id: userId,
-        completed_at: now,
+        completed_at: todayStr,
+        status: 'completed',
         points_earned: 10,
       }))
-      await supabase.from('habit_logs').insert(rows)
+      // UNIQUE(habit_id, completed_at) があるので onConflict で無視
+      await supabase.from('habit_logs').upsert(rows, { onConflict: 'habit_id,completed_at', ignoreDuplicates: true })
       // モンスターのポイントも加算
       const addedPts = habitIds.length * 10
       const newTotal = currentPoints + addedPts
@@ -147,11 +149,13 @@ function DebugPanelInner({
         return {
           habit_id: targetHabitId,
           user_id: userId,
-          completed_at: `${d.toISOString().slice(0, 10)}T12:00:00.000Z`,
+          completed_at: d.toISOString().slice(0, 10),  // YYYY-MM-DD (date型)
+          status: 'completed',
           points_earned: 10,
         }
       })
-      await supabase.from('habit_logs').insert(rows)
+      // UNIQUE(habit_id, completed_at) があるので重複は無視
+      await supabase.from('habit_logs').upsert(rows, { onConflict: 'habit_id,completed_at', ignoreDuplicates: true })
       await onRefresh()
     })
   }

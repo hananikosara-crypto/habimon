@@ -8,15 +8,15 @@ import { checkEvolution } from './evolution-check'
 import { calcNewStreak } from './streak'
 
 // ---- 定数 ----
-export const BASE_POINTS = 10         // 習慣1回完了
-export const COMPLETION_BONUS = 30    // その日の全習慣コンプリート
+export const BASE_POINTS = 10
+export const COMPLETION_BONUS = 30    // 全習慣コンプリートボーナス
 const STREAK_MILESTONES = [
   { days: 100, bonus: 100 },
-  { days: 30, bonus: 50 },
-  { days: 7, bonus: 20 },
+  { days: 30,  bonus: 50 },
+  { days: 7,   bonus: 20 },
 ] as const
 
-// カテゴリ → 能力値カラム
+// カテゴリ (日本語) → 能力値カラム
 const CATEGORY_STAT: Record<GoalCategory, string> = {
   '学習': 'int_val',
   '健康': 'str_val',
@@ -55,22 +55,8 @@ export type CheckHabitResult = {
   newLevel: number
 }
 
-// ---- メイン関数 ----
-
 /**
- * 習慣をチェックし、ポイント計算・DB 更新をまとめて行う
- *
- * @param supabase  ブラウザ Supabase クライアント
- * @param habitId   チェックする習慣 ID
- * @param userId    ログイン中ユーザー ID
- * @param monsterId 紐づくモンスター ID
- * @param category  習慣の目標カテゴリ（能力値更新に使用）
- * @param courseType  コース種別（進化判定に使用）
- * @param currentTotalPoints 現在のモンスター total_points
- * @param currentStage       現在のモンスターステージ
- * @param currentStreak      現在のストリーク日数
- * @param allHabitIds        今日の全習慣 ID 一覧
- * @param completedHabitIds  このチェック前に完了済みの習慣 ID 一覧
+ * 習慣を「完了」としてチェックし、ポイント計算・DB 更新をまとめて行う
  */
 export async function checkHabitAndUpdateMonster(params: {
   supabase: SupabaseClient
@@ -83,7 +69,7 @@ export async function checkHabitAndUpdateMonster(params: {
   currentStage: MonsterStage
   currentStreak: number
   allHabitIds: string[]
-  completedHabitIds: string[]
+  completedHabitIds: string[]    // 今日 completed なログの habit_id 一覧
 }): Promise<CheckHabitResult> {
   const {
     supabase, habitId, userId, monsterId,
@@ -95,12 +81,12 @@ export async function checkHabitAndUpdateMonster(params: {
   // ---- ポイント計算 ----
   let pointsEarned = BASE_POINTS
 
-  // コンプリートボーナス: この習慣を完了すると全タスク達成になるか
+  // 全習慣コンプリートボーナス
   const completedAfter = new Set([...completedHabitIds, habitId])
   const completionBonus = allHabitIds.length > 0 && allHabitIds.every((id) => completedAfter.has(id))
   if (completionBonus) pointsEarned += COMPLETION_BONUS
 
-  // ストリークボーナス: 今日初めての完了時のみ判定
+  // ストリークボーナス: 今日初めての完了時のみ
   const isFirstCompletionToday = completedHabitIds.length === 0
   const newStreak = calcNewStreak(currentStreak, !isFirstCompletionToday)
   const { bonus: streakBonus, milestone: streakMilestone } = isFirstCompletionToday
@@ -114,26 +100,28 @@ export async function checkHabitAndUpdateMonster(params: {
   // ---- 進化チェック ----
   const { evolved, newStage } = checkEvolution(newTotalPoints, currentStage, courseType)
 
-  // ---- DB 更新（並列実行） ----
-  const statCol = CATEGORY_STAT[category]
+  // ---- DB 更新 ----
+  const todayStr = new Date().toISOString().slice(0, 10)  // YYYY-MM-DD
 
-  // 1. habit_logs に記録
+  // 1. habit_logs に記録（completed_at は date 型 = YYYY-MM-DD 文字列）
   const insertLog = supabase.from('habit_logs').insert({
-    habit_id: habitId,
-    user_id: userId,
-    completed_at: new Date().toISOString(),
+    habit_id:      habitId,
+    user_id:       userId,
+    completed_at:  todayStr,
+    status:        'completed',
     points_earned: pointsEarned,
   })
 
   // 2. monsters テーブル更新
   const updateMonster = supabase
     .from('monsters')
-    .update({ total_points: newTotalPoints, level: newLevel, stage: newStage })
+    .update({ total_points: newTotalPoints, level: newLevel, stage: newStage, updated_at: new Date().toISOString() })
     .eq('id', monsterId)
 
   await Promise.all([insertLog, updateMonster])
 
-  // 3. monster_stats 更新（読み取り→+1）
+  // 3. monster_stats 更新（+1）
+  const statCol = CATEGORY_STAT[category]
   const { data: stats } = await supabase
     .from('monster_stats')
     .select('id, int_val, str_val, mnd_val, dex_val, cha_val')
@@ -141,7 +129,7 @@ export async function checkHabitAndUpdateMonster(params: {
     .single()
 
   if (stats) {
-    const currentVal = (stats[statCol as keyof typeof stats] as number) ?? 1
+    const currentVal = (stats[statCol as keyof typeof stats] as number) ?? 0
     await supabase
       .from('monster_stats')
       .update({ [statCol]: currentVal + 1 })

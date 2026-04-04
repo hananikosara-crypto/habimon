@@ -1,9 +1,11 @@
 // ============================================================
-// カテゴリ値のマッピング
-// DB には英語値 ('learning','health',...)、UI には日本語値 ('学習','健康',...) を使用
+// カテゴリ・頻度のマッピング
+// DB には英語値、UI には日本語値を使用
 // ============================================================
 
-import type { GoalCategory } from '@/types'
+import type { GoalCategory, HabitFrequency } from '@/types'
+
+// ---- カテゴリ ----
 
 /** UI表示用 日本語カテゴリ一覧 */
 export const CATEGORY_LIST: GoalCategory[] = ['学習', '健康', '仕事', '生活', '趣味', 'その他']
@@ -28,8 +30,20 @@ export const DB_TO_CATEGORY: Record<string, GoalCategory> = {
   'other': 'その他',
 }
 
-/** DB から読み込んだ category 文字列を GoalCategory に変換（未知値は 'その他' にフォールバック） */
+/** DB から読み込んだ category 文字列を GoalCategory に変換 */
 export function dbToCategory(value: string | null | undefined): GoalCategory {
   if (!value) return 'その他'
   return DB_TO_CATEGORY[value] ?? (CATEGORY_LIST.includes(value as GoalCategory) ? value as GoalCategory : 'その他')
 }
+
+// ---- 頻度 ----
+
+/** 頻度 UI表示ラベル */
+export const FREQUENCY_LABEL: Record<HabitFrequency, string> = {
+  'daily':    '毎日',
+  'weekdays': '平日のみ',
+  'custom':   'カスタム',
+}
+
+/** 頻度 一覧 */
+export const FREQUENCY_LIST: HabitFrequency[] = ['daily', 'weekdays', 'custom']

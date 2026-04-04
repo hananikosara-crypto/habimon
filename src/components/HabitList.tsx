@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { FREQUENCY_LABEL } from '@/lib/categories'
 import type { GoalCategory, HabitFrequency } from '@/types'
 
-// カテゴリ別カラー
+// カテゴリ別カラー（UI表示用日本語キー）
 const CATEGORY_COLOR: Record<GoalCategory, string> = {
   '学習': 'bg-blue-100 text-blue-700',
   '健康': 'bg-green-100 text-green-700',
@@ -13,19 +14,13 @@ const CATEGORY_COLOR: Record<GoalCategory, string> = {
   'その他': 'bg-gray-100 text-gray-600',
 }
 
-const FREQUENCY_LABEL: Record<HabitFrequency, string> = {
-  '毎日': '毎日',
-  '週次': '週1回',
-  'カスタム': 'カスタム',
-}
-
 export type HabitItem = {
   id: string
   title: string
-  frequency: HabitFrequency
-  category: GoalCategory
-  completed: boolean  // 完了済み（ポイント獲得）
-  skipped: boolean    // スキップ済み（記録のみ）
+  frequency: HabitFrequency   // 'daily' | 'weekdays' | 'custom'
+  category: GoalCategory      // 日本語表示用（dbToCategory変換済み）
+  completed: boolean
+  skipped: boolean
 }
 
 type FloatAnimation = {
@@ -35,9 +30,7 @@ type FloatAnimation = {
 
 type HabitListProps = {
   habits: HabitItem[]
-  /** 完了ボタン押下: 戻り値 = 獲得ポイント数（エラー時 null） */
   onCheck?: (habitId: string) => Promise<number | null>
-  /** スキップボタン押下 */
   onSkip?: (habitId: string) => Promise<void>
 }
 
@@ -52,21 +45,13 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
 
     setChecking((prev) => new Set(prev).add(habit.id))
     const points = await onCheck?.(habit.id) ?? null
-    setChecking((prev) => {
-      const next = new Set(prev)
-      next.delete(habit.id)
-      return next
-    })
+    setChecking((prev) => { const n = new Set(prev); n.delete(habit.id); return n })
 
     if (points !== null && points > 0) {
       const animKey = Date.now()
       setFloats((prev) => new Map(prev).set(habit.id, { points, animKey }))
       setTimeout(() => {
-        setFloats((prev) => {
-          const next = new Map(prev)
-          next.delete(habit.id)
-          return next
-        })
+        setFloats((prev) => { const n = new Map(prev); n.delete(habit.id); return n })
       }, 1400)
     }
   }, [checking, skipping, onCheck])
@@ -77,11 +62,7 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
 
     setSkipping((prev) => new Set(prev).add(habit.id))
     await onSkip?.(habit.id)
-    setSkipping((prev) => {
-      const next = new Set(prev)
-      next.delete(habit.id)
-      return next
-    })
+    setSkipping((prev) => { const n = new Set(prev); n.delete(habit.id); return n })
   }, [checking, skipping, onSkip])
 
   if (habits.length === 0) {
@@ -98,12 +79,10 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
 
   return (
     <div className="space-y-3">
-      {/* 完了率ヘッダー */}
+      {/* ヘッダー */}
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium text-gray-700">今日のタスク</span>
-        <span className="text-muted-foreground">
-          {completed} / {total} 完了
-        </span>
+        <span className="text-muted-foreground">{completed} / {total} 完了</span>
       </div>
 
       {/* 習慣リスト */}
@@ -121,7 +100,7 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
               {float && (
                 <div
                   key={float.animKey}
-                  className="animate-float-up absolute right-3 top-1 z-10 text-emerald-600 font-bold text-sm select-none"
+                  className="animate-float-up absolute right-3 top-1 z-10 text-emerald-600 font-bold text-sm select-none pointer-events-none"
                 >
                   +{float.points}pt
                 </div>
@@ -136,7 +115,7 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
                 }`}
               >
                 {/* ステータスアイコン */}
-                <div className={`flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all
+                <div className={`flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center
                   ${habit.completed
                     ? 'bg-emerald-500 border-emerald-500'
                     : habit.skipped
@@ -164,12 +143,7 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
                 {/* 習慣情報 */}
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-medium truncate
-                    ${habit.completed
-                      ? 'line-through text-muted-foreground'
-                      : habit.skipped
-                        ? 'line-through text-muted-foreground/70'
-                        : 'text-gray-800'
-                    }`}
+                    ${habit.completed || habit.skipped ? 'line-through text-muted-foreground' : 'text-gray-800'}`}
                   >
                     {habit.title}
                   </p>
@@ -185,10 +159,9 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
                   {habit.category}
                 </span>
 
-                {/* アクションボタン（未記録のみ表示） */}
+                {/* アクションボタン（未記録のみ） */}
                 {!isLogged && (
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    {/* 完了ボタン */}
                     <button
                       type="button"
                       onClick={() => handleComplete(habit)}
@@ -204,7 +177,6 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
                     </button>
-                    {/* スキップボタン */}
                     <button
                       type="button"
                       onClick={() => handleSkip(habit)}
@@ -228,7 +200,6 @@ export default function HabitList({ habits, onCheck, onSkip }: HabitListProps) {
         })}
       </ul>
 
-      {/* 全完了メッセージ */}
       {completed === total && total > 0 && (
         <div className="text-center py-3 text-sm text-emerald-600 font-semibold">
           🎉 今日のタスクを全部完了！ 素晴らしい！
