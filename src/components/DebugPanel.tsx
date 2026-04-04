@@ -1,12 +1,11 @@
 'use client'
 
 // ============================================================
-// デバッグパネル — 開発環境専用
-// 本番ビルドでは最上部の NODE_ENV チェックにより何も描画しない
-// webpack の dead-code elimination で本番バンドルから除去される
+// デバッグパネル — localhost 専用
+// window.location.hostname === 'localhost' の場合のみ表示
 // ============================================================
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@/lib/supabase'
 import { calcStage } from '@/constants/evolution'
@@ -17,7 +16,7 @@ type DebugPanelProps = {
   monsterId: string
   monsterName: string
   userId: string
-  habitIds: string[]          // ダッシュボード上の全習慣 ID
+  habitIds: string[]
   currentStage: MonsterStage
   currentPoints: number
   courseType: CourseType
@@ -26,10 +25,19 @@ type DebugPanelProps = {
 }
 
 export default function DebugPanel(props: DebugPanelProps) {
-  // 本番ビルドでは絶対に表示しない
-  // process.env.NODE_ENV をインラインで評価（モジュールレベルの定数に依存しない）
-  if (process.env.NODE_ENV !== 'development') return null
+  const [show, setShow] = useState(false)
 
+  useEffect(() => {
+    // localhost または development 環境のみ表示
+    setShow(
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1' ||
+        process.env.NODE_ENV === 'development')
+    )
+  }, [])
+
+  if (!show) return null
   return <DebugPanelInner {...props} />
 }
 

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { createBrowserClient } from '@/lib/supabase'
+import { CATEGORY_TO_DB, CATEGORY_LIST } from '@/lib/categories'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,16 +21,14 @@ import {
 import type { GoalCategory, CourseType, HabitFrequency } from '@/types'
 
 const TOTAL_STEPS = 3
+const FREQUENCIES: HabitFrequency[] = ['毎日', '週次', 'カスタム']
+const MAX_HABITS = 5
 
 type HabitInput = {
   title: string
   frequency: HabitFrequency
   category: GoalCategory
 }
-
-const CATEGORIES: GoalCategory[] = ['学習', '健康', '仕事', '生活', '趣味', 'その他']
-const FREQUENCIES: HabitFrequency[] = ['毎日', '週次', 'カスタム']
-const MAX_HABITS = 5
 
 export default function OnboardingPage() {
   const { user } = useAuth()
@@ -76,48 +75,39 @@ export default function OnboardingPage() {
 
   // データ保存
   const handleFinish = async () => {
-    if (!user) return
-    if (!goalTitle || !courseType) return
+    if (!user) {
+      setError('ログインが必要です。ページをリロードしてください。')
+      return
+    }
+    if (!goalTitle.trim() || !courseType) {
+      setError('目標タイトルとコース期間を入力してください。')
+      return
+    }
 
     setSaving(true)
     setError('')
 
-    try {
-      const validHabits = habits.filter(h => h.title.trim() !== '')
-      // 目標のカテゴリは最初の習慣のカテゴリをデフォルトとして使用
-      const defaultCategory: GoalCategory = validHabits[0]?.category ?? 'その他'
+    const validHabits = habits.filter(h => h.title.trim() !== '')
 
-      // 1. 目標を作成
+    try {
+      // ---- Step 1: 目標を作成（categoryカラムは不要 - DBデフォルト値を使用） ----
       const { data: goal, error: goalError } = await supabase
         .from('goals')
         .insert({
           user_id: user.id,
-          title: goalTitle,
-          category: defaultCategory,  // goals.category は NOT NULL のため
+          title: goalTitle.trim(),
           course_type: courseType,
         })
         .select()
         .single()
 
-      if (goalError) throw goalError
-
-      // 2. 習慣を作成（各習慣にカテゴリ付き）
-      if (validHabits.length > 0) {
-        const { error: habitsError } = await supabase
-          .from('habits')
-          .insert(
-            validHabits.map(h => ({
-              goal_id: goal.id,
-              user_id: user.id,
-              title: h.title,
-              frequency: h.frequency,
-              category: h.category,
-            }))
-          )
-        if (habitsError) throw habitsError
+      if (goalError) {
+        console.error('[onboarding] goals INSERT failed:', goalError)
+        throw new Error(`目標の保存に失敗しました: ${goalError.message}`)
       }
+      console.log('[onboarding] goal created:', goal.id)
 
-      // 3. モンスターを作成
+      // ---- Step 2: モンスターを作成 ----
       const { data: monster, error: monsterError } = await supabase
         .from('monsters')
         .insert({
@@ -131,26 +121,56 @@ export default function OnboardingPage() {
         .select()
         .single()
 
-      if (monsterError) throw monsterError
+      if (monsterError) {
+        console.error('[onboarding] monsters INSERT failed:', monsterError)
+        throw new Error(`モンスターの保存に失敗しました: ${monsterError.message}`)
+      }
+      console.log('[onboarding] monster created:', monster.id)
 
-      // 4. モンスターの能力値を初期化
+      // ---- Step 3: モンスター能力値を初期化 ----
       const { error: statsError } = await supabase
         .from('monster_stats')
         .insert({
           monster_id: monster.id,
-          int_val: 1,
-          str_val: 1,
-          mnd_val: 1,
-          dex_val: 1,
-          cha_val: 1,
+          int_val: 0,
+          str_val: 0,
+          mnd_val: 0,
+          dex_val: 0,
+          cha_val: 0,
         })
 
-      if (statsError) throw statsError
+      if (statsError) {
+        console.error('[onboarding] monster_stats INSERT failed:', statsError)
+        throw new Error(`モンスター能力値の保存に失敗しました: ${statsError.message}`)
+      }
+      console.log('[onboarding] monster_stats created')
+
+      // ---- Step 4: 習慣を作成（categoryを英語値でDB保存） ----
+      if (validHabits.length > 0) {
+        const { error: habitsError } = await supabase
+          .from('habits')
+          .insert(
+            validHabits.map(h => ({
+              goal_id: goal.id,
+              user_id: user.id,
+              title: h.title.trim(),
+              frequency: h.frequency,
+              category: CATEGORY_TO_DB[h.category],  // 日本語 → 英語に変換してDB保存
+            }))
+          )
+
+        if (habitsError) {
+          console.error('[onboarding] habits INSERT failed:', habitsError)
+          throw new Error(`習慣の保存に失敗しました: ${habitsError.message}`)
+        }
+        console.log('[onboarding] habits created:', validHabits.length)
+      }
 
       router.replace('/dashboard')
     } catch (err) {
-      console.error(err)
-      setError('データの保存に失敗しました。もう一度お試しください。')
+      const message = err instanceof Error ? err.message : 'データの保存に失敗しました'
+      console.error('[onboarding] handleFinish error:', err)
+      setError(message)
       setSaving(false)
     }
   }
@@ -282,7 +302,7 @@ export default function OnboardingPage() {
                   <div className="space-y-1.5">
                     <Label>カテゴリ</Label>
                     <div className="flex flex-wrap gap-1.5">
-                      {CATEGORIES.map((cat) => (
+                      {CATEGORY_LIST.map((cat) => (
                         <Badge
                           key={cat}
                           variant={habit.category === cat ? 'default' : 'outline'}
@@ -342,7 +362,7 @@ export default function OnboardingPage() {
           </Card>
         )}
 
-        {/* ======== Step 3: モンスター命名 ======== */}
+        {/* ======== Step 3: モンスター命名 + 確認サマリー ======== */}
         {step === 3 && (
           <Card>
             <CardHeader>
@@ -377,31 +397,33 @@ export default function OnboardingPage() {
 
               {/* 確認サマリー */}
               <div className="bg-muted/50 rounded-lg p-4 space-y-2 text-sm">
-                <p className="font-medium text-muted-foreground">確認</p>
+                <p className="font-medium text-muted-foreground mb-3">確認サマリー</p>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">目標</span>
                   <span className="font-medium truncate max-w-[200px]">{goalTitle}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">コース</span>
-                  <span>{courseType}</span>
+                  <span>{courseType}コース（{courseType === '1年' ? '7段階' : '11段階'}進化）</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">習慣数</span>
                   <span>{habits.filter(h => h.title.trim()).length}個</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">カテゴリ</span>
-                  <span className="flex gap-1 flex-wrap justify-end">
-                    {[...new Set(habits.filter(h => h.title.trim()).map(h => h.category))].map(cat => (
-                      <Badge key={cat} variant="secondary" className="text-xs">{cat}</Badge>
-                    ))}
-                  </span>
+                <div className="pt-1 space-y-1">
+                  {habits.filter(h => h.title.trim()).map((h, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground truncate max-w-[150px]">• {h.title}</span>
+                      <Badge variant="secondary" className="text-xs ml-2 shrink-0">{h.category}</Badge>
+                    </div>
+                  ))}
                 </div>
               </div>
 
               {error && (
-                <p className="text-sm text-destructive">{error}</p>
+                <div className="text-sm text-destructive bg-red-50 border border-red-200 rounded-lg p-3">
+                  {error}
+                </div>
               )}
 
               <div className="flex gap-3">

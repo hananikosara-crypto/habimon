@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { createBrowserClient } from '@/lib/supabase'
 import { checkHabitAndUpdateMonster } from '@/lib/points'
 import { calcStreak } from '@/lib/streak'
+import { dbToCategory } from '@/lib/categories'
 import { getEvolutionTable } from '@/constants/evolution'
 import MonsterDisplay from '@/components/MonsterDisplay'
 import HabitList, { type HabitItem } from '@/components/HabitList'
@@ -14,7 +15,7 @@ import BottomNav from '@/components/BottomNav'
 import EvolutionAnimation from '@/components/EvolutionAnimation'
 import DebugPanel from '@/components/DebugPanel'
 import { Button } from '@/components/ui/button'
-import type { GoalCategory, CourseType, HabitFrequency, MonsterStage } from '@/types'
+import type { GoalCategory, CourseType, HabitFrequency, MonsterStage, HabitStatus } from '@/types'
 
 // DB から返る行の型
 type GoalRow = {
@@ -39,7 +40,7 @@ type HabitRow = {
   goal_id: string
   title: string
   frequency: HabitFrequency
-  category: GoalCategory | null  // 習慣ごとのカテゴリ
+  category: string | null  // DB は英語値
 }
 
 type HabitLogRow = {
@@ -47,6 +48,7 @@ type HabitLogRow = {
   habit_id: string
   completed_at: string
   points_earned: number
+  status: HabitStatus  // 'completed' | 'skipped'
 }
 
 // ========== メインページ ==========
@@ -54,7 +56,6 @@ export default function DashboardPage() {
   const { user, loading: authLoading, signOut } = useAuth()
   const router = useRouter()
   const supabase = createBrowserClient()
-  // supabase インスタンスを ref で保持（useCallback の依存から外す）
   const supabaseRef = useRef(supabase)
 
   // データ状態
@@ -90,17 +91,22 @@ export default function DashboardPage() {
 
     try {
       // 1. アクティブな目標を取得
-      const { data: goalsData } = await sb
+      const { data: goalsData, error: goalsError } = await sb
         .from('goals')
         .select('id, title, category, course_type, status')
         .eq('user_id', user.id)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
 
+      if (goalsError) {
+        console.error('[dashboard] goals fetch error:', goalsError)
+      }
+
       const activeGoals: GoalRow[] = goalsData ?? []
       setGoals(activeGoals)
 
       if (activeGoals.length === 0) {
+        setDataLoading(false)
         router.replace('/onboarding')
         return
       }
@@ -108,44 +114,65 @@ export default function DashboardPage() {
       const goalIds = activeGoals.map((g) => g.id)
 
       // 2. 最初の目標に紐づくモンスターを取得
-      const { data: monsterData } = await sb
+      const { data: monsterData, error: monsterError } = await sb
         .from('monsters')
         .select('id, goal_id, name, stage, total_points, level')
         .eq('goal_id', activeGoals[0].id)
-        .single()
+        .maybeSingle()
 
+      if (monsterError) {
+        console.error('[dashboard] monster fetch error:', monsterError)
+      }
       setMonster(monsterData ?? null)
 
       // 3. 習慣を取得（category を含む）
-      const { data: habitsData } = await sb
+      const { data: habitsData, error: habitsError } = await sb
         .from('habits')
         .select('id, goal_id, title, frequency, category')
         .in('goal_id', goalIds)
         .eq('user_id', user.id)
 
+      if (habitsError) {
+        console.error('[dashboard] habits fetch error:', habitsError)
+      }
       setHabits(habitsData ?? [])
 
-      // 4. 今日の habit_logs を取得
+      // 4. 今日の habit_logs を取得（status含む）
       const todayStr = new Date().toISOString().slice(0, 10)
-      const { data: todayLogsData } = await sb
+      const { data: todayLogsData, error: logsError } = await sb
         .from('habit_logs')
-        .select('id, habit_id, completed_at, points_earned')
+        .select('id, habit_id, completed_at, points_earned, status')
         .eq('user_id', user.id)
         .gte('completed_at', `${todayStr}T00:00:00`)
         .lte('completed_at', `${todayStr}T23:59:59.999`)
 
-      setTodayLogs(todayLogsData ?? [])
+      if (logsError) {
+        console.error('[dashboard] todayLogs fetch error:', logsError)
+      }
+      setTodayLogs(
+        (todayLogsData ?? []).map(log => ({
+          ...log,
+          status: (log.status ?? 'completed') as HabitStatus,
+        }))
+      )
 
       // 5. 過去 60 日分のログ（ストリーク計算用）
       const sixtyDaysAgo = new Date()
       sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60)
       const { data: allLogsData } = await sb
         .from('habit_logs')
-        .select('id, habit_id, completed_at, points_earned')
+        .select('id, habit_id, completed_at, points_earned, status')
         .eq('user_id', user.id)
         .gte('completed_at', sixtyDaysAgo.toISOString())
 
-      setAllLogs(allLogsData ?? [])
+      setAllLogs(
+        (allLogsData ?? []).map(log => ({
+          ...log,
+          status: (log.status ?? 'completed') as HabitStatus,
+        }))
+      )
+    } catch (err) {
+      console.error('[dashboard] fetchData unexpected error:', err)
     } finally {
       setDataLoading(false)
     }
@@ -157,7 +184,7 @@ export default function DashboardPage() {
     }
   }, [user, authLoading, fetchData])
 
-  // ========== 習慣チェック処理 ==========
+  // ========== 習慣チェック（完了）処理 ==========
   const handleCheck = useCallback(async (habitId: string): Promise<number | null> => {
     if (!user || !monster) return null
 
@@ -167,13 +194,16 @@ export default function DashboardPage() {
     const habit = habits.find((h) => h.id === habitId)
     if (!habit) return null
 
-    // 完了済みチェック（二重防止）
+    // 既にログ済みチェック（完了・スキップ問わず）
     if (todayLogs.some((log) => log.habit_id === habitId)) return null
 
     const allHabitIds = habits.map((h) => h.id)
-    const completedHabitIds = todayLogs.map((log) => log.habit_id)
+    // 完了済みのみをボーナス計算に使用
+    const completedHabitIds = todayLogs
+      .filter(log => log.status === 'completed')
+      .map((log) => log.habit_id)
     const currentStreak = calcStreak(allLogs)
-    const currentStage = monster.stage  // 進化前ステージ（演出用に保存）
+    const currentStage = monster.stage
 
     try {
       const result = await checkHabitAndUpdateMonster({
@@ -181,7 +211,7 @@ export default function DashboardPage() {
         habitId,
         userId: user.id,
         monsterId: monster.id,
-        category: habit.category ?? 'その他',  // 習慣ごとのカテゴリを使用
+        category: dbToCategory(habit.category),  // 英語DB値 → 日本語GoalCategory
         courseType: primaryGoal.course_type,
         currentTotalPoints: monster.total_points,
         currentStage,
@@ -196,6 +226,7 @@ export default function DashboardPage() {
         habit_id: habitId,
         completed_at: new Date().toISOString(),
         points_earned: result.pointsEarned,
+        status: 'completed',
       }
       setTodayLogs((prev) => [...prev, newLog])
       setAllLogs((prev) => [...prev, newLog])
@@ -221,10 +252,48 @@ export default function DashboardPage() {
 
       return result.pointsEarned
     } catch (err) {
-      console.error('習慣チェックエラー:', err)
+      console.error('[dashboard] handleCheck error:', err)
       return null
     }
-  }, [user, monster, goals, habits, todayLogs, allLogs, fetchData])
+  }, [user, monster, goals, habits, todayLogs, allLogs])
+
+  // ========== 習慣スキップ処理 ==========
+  const handleSkip = useCallback(async (habitId: string): Promise<void> => {
+    if (!user || !monster) return
+
+    // 既にログ済みチェック
+    if (todayLogs.some((log) => log.habit_id === habitId)) return
+
+    try {
+      const { error } = await supabaseRef.current
+        .from('habit_logs')
+        .insert({
+          habit_id: habitId,
+          user_id: user.id,
+          completed_at: new Date().toISOString(),
+          points_earned: 0,
+          status: 'skipped',
+        })
+
+      if (error) {
+        console.error('[dashboard] handleSkip error:', error)
+        return
+      }
+
+      // ローカル状態を楽観的に更新
+      const newLog: HabitLogRow = {
+        id: `temp-skip-${Date.now()}`,
+        habit_id: habitId,
+        completed_at: new Date().toISOString(),
+        points_earned: 0,
+        status: 'skipped',
+      }
+      setTodayLogs((prev) => [...prev, newLog])
+      setAllLogs((prev) => [...prev, newLog])
+    } catch (err) {
+      console.error('[dashboard] handleSkip unexpected error:', err)
+    }
+  }, [user, monster, todayLogs])
 
   // デバッグ用：進化演出を強制発動
   const handleTriggerEvolution = useCallback((oldStage: MonsterStage, newStage: MonsterStage) => {
@@ -262,14 +331,20 @@ export default function DashboardPage() {
   }
 
   // ========== 派生データ計算 ==========
-  const completedHabitIds = new Set(todayLogs.map((log) => log.habit_id))
+  const completedHabitIds = new Set(
+    todayLogs.filter(log => log.status === 'completed').map((log) => log.habit_id)
+  )
+  const skippedHabitIds = new Set(
+    todayLogs.filter(log => log.status === 'skipped').map((log) => log.habit_id)
+  )
 
   const todayHabits: HabitItem[] = habits.map((habit) => ({
     id: habit.id,
     title: habit.title,
     frequency: habit.frequency,
-    category: habit.category ?? 'その他',  // 習慣ごとのカテゴリ
+    category: dbToCategory(habit.category),  // 英語DB値 → 日本語表示用
     completed: completedHabitIds.has(habit.id),
+    skipped: skippedHabitIds.has(habit.id),
   }))
 
   const totalToday = todayHabits.length
@@ -292,7 +367,7 @@ export default function DashboardPage() {
           newStageName={evolutionInfo.newStageName}
           onClose={() => {
             setEvolutionInfo(null)
-            fetchData()  // 演出後にデータ再取得
+            fetchData()
           }}
         />
       )}
@@ -336,9 +411,12 @@ export default function DashboardPage() {
             courseType={primaryGoal?.course_type ?? '1年'}
           />
         ) : (
-          <div className="text-center py-10 text-muted-foreground">
+          <div className="text-center py-10 text-muted-foreground bg-white rounded-2xl border border-border shadow-sm">
             <p className="text-4xl mb-2">🥚</p>
             <p className="text-sm">モンスターが見つかりません</p>
+            <p className="text-xs mt-1 text-muted-foreground/70">
+              データベースのマイグレーションを確認してください
+            </p>
           </div>
         )}
 
@@ -355,6 +433,7 @@ export default function DashboardPage() {
           <HabitList
             habits={todayHabits}
             onCheck={handleCheck}
+            onSkip={handleSkip}
           />
         </div>
 
@@ -367,7 +446,7 @@ export default function DashboardPage() {
 
       <BottomNav />
 
-      {/* ========== デバッグパネル（開発環境のみ） ========== */}
+      {/* ========== デバッグパネル ========== */}
       {monster && (
         <DebugPanel
           monsterId={monster.id}

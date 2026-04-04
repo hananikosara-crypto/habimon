@@ -50,6 +50,9 @@ export type Habit = {
   updated_at: string
 }
 
+// 習慣ログのステータス
+export type HabitStatus = 'completed' | 'skipped'
+
 // 習慣の完了ログ
 export type HabitLog = {
   id: string
@@ -57,6 +60,7 @@ export type HabitLog = {
   user_id: string
   completed_at: string  // ISO 8601 日付文字列
   points_earned: number
+  status: HabitStatus   // 'completed' or 'skipped'
   note: string | null
 }
 
