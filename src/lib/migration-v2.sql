@@ -16,9 +16,11 @@ ALTER TABLE habit_logs ADD COLUMN IF NOT EXISTS status text DEFAULT 'completed'
   CHECK (status IN ('completed','skipped'));
 
 -- --------------------------------------------------------
--- 3. goals.category にデフォルト値を設定
---    （オンボーディングで category を省略可能にするため）
+-- 3. goals.category の制約を緩和
+--    カテゴリは習慣単位に移動したため、goals では不要
 -- --------------------------------------------------------
+ALTER TABLE goals DROP CONSTRAINT IF EXISTS goals_category_check;
+ALTER TABLE goals ALTER COLUMN category DROP NOT NULL;
 ALTER TABLE goals ALTER COLUMN category SET DEFAULT 'other';
 
 -- --------------------------------------------------------
